@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>J.A.R.V.I.S.</title>
+<style>
+  :root {
+    --amber: #ffaa30;
+    --amber-bright: #ffd27a;
+    --amber-dim: rgba(255,170,48,.45);
+    --amber-faint: rgba(255,170,48,.18);
+    --panel: rgba(16,10,2,.78);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", sans-serif;
+    color: #ffe3b3;
+    background: #010102;
+    letter-spacing: .4px;
+  }
+
+  /* ---------- full-screen orb ---------- */
+  #orb-stage { position: absolute; inset: 0; }
+  #orb-stage canvas { display: block; }
+  body.speaking #orb-stage { filter: brightness(1.18) saturate(1.15); }
+  body.thinking  #orb-stage { filter: brightness(.82) saturate(.9); }
+  body.listening #orb-stage { filter: brightness(1.06); }
+  #orb-stage { transition: filter .4s ease; }
+
+  /* ---------- guaranteed-on fallback orb (if WebGL ever fails) ---------- */
+  #orb-stage .orb2d {
+    position: absolute; left: 50%; top: 50%;
+    width: 300px; height: 300px; margin: -150px 0 0 -150px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%,
+      rgba(255,210,122,.95) 0%, rgba(255,170,48,.55) 38%,
+      rgba(120,60,0,.18) 62%, rgba(1,1,2,0) 72%);
+    box-shadow: 0 0 60px rgba(255,170,48,.55), 0 0 160px rgba(255,170,48,.28);
+    animation: orbBreathe 3.2s ease-in-out infinite;
+    pointer-events: none;
+  }
+  #orb-stage .orb2d::before, #orb-stage .orb2d::after {
+    content: ""; position: absolute; inset: -34px; border-radius: 50%;
+    border: 2px solid rgba(255,170,48,.5);
+    animation: orbSpin 9s linear infinite;
+  }
+  #orb-stage .orb2d::after { inset: -64px; border-color: rgba(255,170,48,.28); animation-duration: 15s; animation-direction: reverse; }
+  @keyframes orbBreathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.14); } }
+  @keyframes orbSpin { to { transform: rotate(360deg); } }
+
+  /* ---------- film overlays (like the original) ---------- */
+  .overlay-vignette {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(0,0,0,.72) 100%);
+  }
+  .overlay-scanlines {
+    position: absolute; inset: 0; pointer-events: none; opacity: .5;
+    background: repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,.22) 3px);
+  }
+  .overlay-grain {
+    position: absolute; inset: 0; pointer-events: none; opacity: .05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  }
+
+  /* ---------- HUD ---------- */
+  .hud-title {
+    position: absolute; top: 24px; left: 34px; z-index: 10;
+    font-size: 30px; letter-spacing: 14px; font-weight: 600;
+    color: var(--amber-bright);
+    text-shadow: 0 0 18px rgba(255,170,48,.65), 0 0 42px rgba(255,170,48,.35);
+  }
+  #status {
+    position: absolute; top: 34px; right: 40px; z-index: 10;
+    font-size: 13px; letter-spacing: 8px; color: var(--amber);
+    text-transform: uppercase;
+  }
+  .chat-toggle {
+    position: absolute; top: 66px; right: 40px; z-index: 12;
+    border: 1px solid var(--amber-dim); background: rgba(255,170,48,.1);
+    color: var(--amber); border-radius: 4px; padding: 5px 14px;
+    font-size: 11px; letter-spacing: 3px; cursor: pointer; text-transform: uppercase;
+  }
+  .chat-toggle:hover { background: rgba(255,170,48,.28); }
+  .chat-toggle.off { opacity: .55; }
+  .panel.hidden { display: none; }
+  .gest-toggle {
+    position: absolute; top: 100px; right: 40px; z-index: 12;
+    border: 1px solid var(--amber-dim); background: rgba(255,170,48,.1);
+    color: var(--amber); border-radius: 4px; padding: 5px 14px;
+    font-size: 11px; letter-spacing: 3px; cursor: pointer; text-transform: uppercase;
+  }
+  .gest-toggle:hover { background: rgba(255,170,48,.28); }
+  .gest-toggle.on { background: rgba(255,170,48,.28); box-shadow: 0 0 12px rgba(255,170,48,.5); }
+  #orb-stage { touch-action: none; }
+  .cam-panel {
+    position: absolute; bottom: 18px; right: 20px; z-index: 12;
+    width: 200px; border: 1px solid var(--amber-dim); border-radius: 8px;
+    overflow: hidden; background: rgba(8,5,0,.88);
+  }
+  .cam-panel.hidden { display: none; }
+  .cam-panel video {
+    width: 100%; height: 150px; object-fit: cover;
+    transform: scaleX(-1); display: block; background: #000;
+  }
+  .cam-panel canvas {
+    position: absolute; left: 0; top: 0; width: 100%; height: 150px;
+    transform: scaleX(-1);
+  }
+  .cam-status {
+    padding: 6px 8px; font-size: 10px; letter-spacing: 2px;
+    color: var(--amber); text-transform: uppercase;
+  }
+
+  /* ---------- chat panel ---------- */
+  .panel {
+    position: absolute; right: 20px; top: 76px; bottom: 74px; width: 370px; z-index: 11;
+    display: flex; flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--amber-dim);
+    border-radius: 10px;
+    backdrop-filter: blur(5px);
+    box-shadow: 0 0 34px rgba(0,0,0,.7);
+    overflow: hidden;
+  }
+  .panel-title {
+    padding: 13px 16px; font-size: 12px; letter-spacing: 5px; color: var(--amber);
+    border-bottom: 1px solid var(--amber-dim);
+    text-transform: uppercase;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #ffaa30; box-shadow: 0 0 8px #ffaa30; }
+
+  .chat { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+  .chat::-webkit-scrollbar { width: 6px; }
+  .chat::-webkit-scrollbar-thumb { background: var(--amber-dim); border-radius: 3px; }
+
+  .msg { max-width: 88%; padding: 9px 13px; border-radius: 10px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: rgba(255,170,48,.16); border: 1px solid rgba(255,170,48,.4); }
+  .msg.jarvis { align-self: flex-start; background: rgba(255,255,255,.06); border: 1px solid rgba(255,170,48,.2); }
+  .msg.error { border-color: rgba(255,90,90,.6); color: #ffb3b3; }
+  .msg .who { display: block; font-size: 10px; letter-spacing: 2px; color: var(--amber-dim); margin-bottom: 4px; text-transform: uppercase; }
+
+  .composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--amber-dim); }
+  #input {
+    flex: 1; background: rgba(8,4,0,.85); color: #ffe9c4;
+    border: 1px solid var(--amber-dim); border-radius: 6px;
+    padding: 11px 13px; font-size: 14px; outline: none;
+  }
+  #input:focus { border-color: var(--amber); box-shadow: 0 0 10px rgba(255,170,48,.4); }
+  .btn {
+    border: 1px solid var(--amber-dim); background: rgba(255,170,48,.12);
+    color: var(--amber); border-radius: 6px; padding: 0 16px; font-size: 12px;
+    letter-spacing: 1px; cursor: pointer; text-transform: uppercase;
+  }
+  .btn:hover { background: rgba(255,170,48,.3); }
+  .mic {
+    width: 44px; padding: 0; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 17px;
+  }
+  .mic:disabled { opacity: .35; cursor: not-allowed; }
+  .mic.active {
+    background: var(--amber); color: #140a00;
+    box-shadow: 0 0 14px rgba(255,170,48,.85);
+    animation: micPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes micPulse {
+    0%, 100% { box-shadow: 0 0 10px rgba(255,170,48,.6); }
+    50% { box-shadow: 0 0 22px rgba(255,170,48,1); }
+  }
+</style>
+</head>
+<body>
+
+<div id="orb-stage"></div>
+<div class="overlay-vignette"></div>
+<div class="overlay-scanlines"></div>
+<div class="overlay-grain"></div>
+
+<div class="hud-title">J.A.R.V.I.S.</div>
+<div id="status">IDLE</div>
+<button class="chat-toggle off" id="chatToggleBtn" title="Show / hide conversation">CHAT</button>
+<button class="gest-toggle" id="gestToggleBtn" title="Pinch one hand and move to spin; pinch two hands and spread to zoom. Needs your webcam.">GESTURES</button>
+
+<div class="cam-panel hidden" id="camPanel">
+  <video id="cam" muted playsinline></video>
+  <canvas id="camOverlay" width="200" height="150"></canvas>
+  <div class="cam-status" id="camStatus">SHOW HANDS</div>
+</div>
+
+<div class="panel hidden">
+  <div class="panel-title"><span>Conversation</span><span class="dot"></span></div>
+  <div class="chat" id="chat">
+    <div class="msg jarvis"><span class="who">Jarvis</span>Hello, I am Jarvis. How can I help you?</div>
+  </div>
+  <div class="composer">
+    <button class="btn mic" id="micBtn" title="On/off voice input - say 'hey jarvis' to talk to her">&#127908;</button>
+    <input id="input" autocomplete="off" placeholder="Type a message...">
+    <button class="btn" id="sendBtn">Send</button>
+  </div>
+</div>
+
+<script src="ultron/three.min.js"></script>
+<script src="ultron/CopyShader.js"></script>
+<script src="ultron/LuminosityHighPassShader.js"></script>
+<script src="ultron/Pass.js"></script>
+<script src="ultron/MaskPass.js"></script>
+<script src="ultron/ShaderPass.js"></script>
+<script src="ultron/RenderPass.js"></script>
+<script src="ultron/UnrealBloomPass.js"></script>
+<script src="ultron/EffectComposer.js"></script>
+<script src="ultron/OrbitControls.js"></script>
+<script src="ultron/orb.js"></script>
+<script type="module">
+  import { FilesetResolver, HandLandmarker } from "/ultron/mediapipe/vision_bundle.mjs";
+  window.FilesetResolver = FilesetResolver;
+  window.HandLandmarker = HandLandmarker;
+</script>
+<script src="ultron/handTracker.js"></script>
+
+<script>
+  window.addEventListener('error', function (e) {
+    document.getElementById('status').textContent = 'ERR: ' + (e.message || 'script');
+  });
+
+  // ---------- orb ----------
+  // Create the orb. It runs its own animation loop and still supports
+  // DRAG to spin and SCROLL to zoom, but that is no longer shown on screen.
+  // If the 3D engine could not start (old page, blocked script, blocked
+  // internet, ...) we still keep the chat and error reporting alive.
+  function pageLog(msg) {
+    try {
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.log) {
+        window.pywebview.api.log(msg);
+      } else {
+        console.error(msg);
+      }
+    } catch (_) {}
+  }
+  // Same as pageLog but retries until the JS bridge exists (early logs
+  // otherwise silently vanish, making blank-page bugs invisible).
+  function logWhenAble(msg) {
+    let tries = 0;
+    (function attempt() {
+      try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.log) {
+          window.pywebview.api.log(msg);
+        } else if (tries++ < 20) {
+          setTimeout(attempt, 150);
+        } else {
+          console.error(msg);
+        }
+      } catch (_) {}
+    })();
+  }
+  window.addEventListener('error', (ev) => {
+    pageLog('JS ERROR: ' + (ev.message || ev.error) + ' @' + (ev.filename || '') + ':' + (ev.lineno || ''));
+  });
+  let orbApi = null;
+  try {
+    orbApi = window.createOrbScene(document.getElementById('orb-stage'));
+    window.__orb = orbApi;
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    const stack = (e && e.stack) ? String(e.stack).split('\n').slice(0, 4).join(' | ') : '';
+    window.__orbError = msg;
+    orbApi = null;
+    logWhenAble('ORB ERROR: ' + msg + ' || ' + stack);
+    const fallback = document.createElement('div');
+    fallback.className = 'orb2d';
+    document.getElementById('orb-stage').appendChild(fallback);
+  }
+
+  // Self-heal: if the orb script somehow failed to load, retry it.
+  window.__ensureOrb = function (retries) {
+    if (window.createOrbScene && !window.__orb) {
+      try {
+        orbApi = window.createOrbScene(document.getElementById('orb-stage'));
+        window.__orb = orbApi;
+        window.__orbError = null;
+        logWhenAble('BOOT2: orb created on retry');
+        return;
+      } catch (e) {
+        logWhenAble('BOOT2: orb retry failed ' + (e && e.message));
+      }
+    }
+    if (retries <= 0) return;
+    if (typeof window.createOrbScene === 'function') return;
+    const s = document.createElement('script');
+    s.src = 'ultron/orb.js?' + Date.now();
+    s.onload = function () {
+      setTimeout(window.__ensureOrb, 300, retries - 1);
+    };
+    s.onerror = function () {
+      setTimeout(window.__ensureOrb, 500, retries - 1);
+    };
+    document.body.appendChild(s);
+  };
+  setTimeout(window.__ensureOrb, 600, 3);
+
+  // Boot diagnostics: report what the page saw, straight to Jarvis's log.
+  logWhenAble('BOOT: ready=' + document.readyState
+    + ' three=' + (typeof THREE !== 'undefined')
+    + ' orbCreated=' + (!!orbApi)
+    + ' orbError=' + (window.__orbError || 'none')
+    + ' stage=' + (function () {
+      const s = document.getElementById('orb-stage');
+      return s ? s.clientWidth + 'x' + s.clientHeight : 'missing';
+    })()
+    + ' canvas=' + (orbApi ? orbApi.canvas.width + 'x' + orbApi.canvas.height : 'none')
+    + ' hidden=' + document.hidden
+    + ' viewport=' + window.innerWidth + 'x' + window.innerHeight);
+  setTimeout(function () {
+    try {
+      pageLog('T1500: frames=' + (orbApi ? orbApi.frameCountLive() : 'na')
+        + ' pixel=' + (window.__orbDiag ? JSON.stringify(window.__orbDiag().centerPixel) : 'na'));
+    } catch (e) {}
+  }, 1500);
+
+  // ---------- hand gestures (webcam) ----------
+  const gestBtn = document.getElementById('gestToggleBtn');
+  const camPanelEl = document.getElementById('camPanel');
+  const camEl = document.getElementById('cam');
+  const camOverlayEl = document.getElementById('camOverlay');
+  const camStatusEl = document.getElementById('camStatus');
+  let tracker = null;
+  let gesturesOn = false;
+
+  gestBtn.addEventListener('click', async () => {
+    if (gesturesOn) {
+      tracker.stop();
+      tracker = null;
+      gesturesOn = false;
+      camPanelEl.classList.add('hidden');
+      gestBtn.classList.remove('on');
+      gestBtn.textContent = 'GESTURES';
+      return;
+    }
+    if (typeof window.HandTracker !== 'function' || typeof window.FilesetResolver !== 'function') {
+      camStatusEl.textContent = 'NEEDS INTERNET (FIRST TIME)';
+      return;
+    }
+    if (!orbApi) {
+      camStatusEl.textContent = 'ORB NOT READY';
+      return;
+    }
+    camPanelEl.classList.remove('hidden');
+    gestBtn.textContent = 'INITIALIZING…';
+    try {
+      tracker = new window.HandTracker(camEl, camOverlayEl, {
+        onRotate: (dt, dp) => { if (orbApi) orbApi.rotateBy(dt, dp); },
+        onZoom: (f) => { if (orbApi) orbApi.zoomBy(f); },
+        onStatus: (s) => {
+          camStatusEl.textContent = s.hands > 0
+            ? s.hands + (s.hands > 1 ? ' HANDS' : ' HAND') + ' · ' + (s.mode === 'spin' ? 'SPIN' : s.mode === 'zoom' ? 'ZOOM' : 'STANDBY')
+            : 'SHOW HANDS';
+        }
+      });
+      await tracker.start();
+      gesturesOn = true;
+      gestBtn.classList.add('on');
+      gestBtn.textContent = 'GESTURES ON';
+    } catch (e) {
+      camPanelEl.classList.add('hidden');
+      gestBtn.classList.remove('on');
+      gestBtn.textContent = 'GESTURES OFF';
+      camStatusEl.textContent = 'CAMERA ' + ((e && e.name) || 'DENIED');
+    }
+  });
+
+  // ---------- mouse / touch drag, scroll zoom, keyboard (Sagar parity) ----------
+  const stageEl = document.getElementById('orb-stage');
+  let dragLast = null;
+  stageEl.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    dragLast = { x: e.clientX, y: e.clientY };
+    if (stageEl.setPointerCapture) stageEl.setPointerCapture(e.pointerId);
+  });
+  stageEl.addEventListener('pointermove', (e) => {
+    if (!dragLast || !orbApi) return;
+    const dx = e.clientX - dragLast.x;
+    const dy = e.clientY - dragLast.y;
+    dragLast = { x: e.clientX, y: e.clientY };
+    if (Math.abs(dx) + Math.abs(dy) > 0.5) orbApi.rotateBy(dx * 0.006, dy * 0.006);
+  });
+  stageEl.addEventListener('pointerup', () => { dragLast = null; });
+  stageEl.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (orbApi) orbApi.zoomBy(Math.exp(e.deltaY * 0.0012));
+  }, { passive: false });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    const k = e.key;
+    if (k === '+' || k === '=') { if (orbApi) orbApi.zoomIn(); e.preventDefault(); }
+    else if (k === '-' || k === '_') { if (orbApi) orbApi.zoomOut(); e.preventDefault(); }
+    else if (k === 'r' || k === 'R') { if (orbApi) orbApi.resetView(); }
+    else if (k === 'g' || k === 'G') { gestBtn.click(); }
+  });
+
+  // ---------- show / hide the conversation ----------
+  const panelEl = document.querySelector('.panel');
+  const chatToggleBtn = document.getElementById('chatToggleBtn');
+  chatToggleBtn.addEventListener('click', () => {
+    const hidden = panelEl.classList.toggle('hidden');
+    chatToggleBtn.classList.toggle('off', hidden);
+  });
+
+  // ---------- chat ----------
+  const chat = document.getElementById('chat');
+  const input = document.getElementById('input');
+  const statusEl = document.getElementById('status');
+  const bodyEl = document.body;
+  let currentMsg = null;
+
+  function setState(state) {
+    bodyEl.className = state === 'idle' ? '' : state;
+    statusEl.textContent = state.toUpperCase();
+  }
+  // Jarvis is talking through the orb -> the orb jitters as if the voice
+  // is coming from it. Called from Python around every speak() call.
+  window.setSpeakState = function (speaking) {
+    document.body.classList.toggle('speaking', !!speaking);
+  };
+  if (window.__orbError) {
+    statusEl.style.color = '#ff6a3d';
+    statusEl.textContent = 'ORB ERROR - ' + window.__orbError;
+    window.__orbError = null;
+  }
+
+  function addMsg(who, text, cls) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + (cls || who);
+    div.innerHTML = '<span class="who">' + who + '</span>';
+    div.appendChild(document.createTextNode(text));
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+
+  // ---------- WebGL crash recovery ----------
+  // If the WebView2 GPU process dies (common under memory pressure),
+  // the 3D canvas turns permanently black ("chat works, orb is black").
+  // Reload the page once to get a fresh renderer; give up after a few
+  // attempts so we do not loop forever.
+  {
+    let ctxLostAt = 0;
+    let reloaded = 0;
+    const cv = document.querySelector('#orb-stage canvas');
+    if (cv) {
+      cv.addEventListener('webglcontextlost', (ev) => {
+        ev.preventDefault();
+        if (!ctxLostAt && reloaded < 3) {
+          ctxLostAt = Date.now() + 1200;
+          pageLog('WEBGL CONTEXT LOST - reloading');
+        }
+      }, false);
+    }
+    setInterval(() => {
+      if (ctxLostAt && Date.now() >= ctxLostAt) {
+        ctxLostAt = 0;
+        reloaded++;
+        if (reloaded <= 3) {
+          location.reload();
+        } else {
+          statusEl.style.color = '#ff6a3d';
+          statusEl.textContent = 'WEBGL UNAVAILABLE';
+        }
+      }
+    }, 400);
+  }
+
+  function onUserMsg(text) { addMsg('user', text); }
+
+  // --- functions called from Python ---
+  function onStart() {
+    setState('thinking');
+    currentMsg = addMsg('jarvis', '');
+  }
+  function onNote(text) {
+    if (currentMsg) currentMsg.lastChild.textContent = text;
+    else addMsg('jarvis', text);
+    chat.scrollTop = chat.scrollHeight;
+  }
+  function onChunk(text) {
+    if (currentMsg) {
+      currentMsg.lastChild.textContent += text;
+      chat.scrollTop = chat.scrollHeight;
+    }
+  }
+  function onError(text) {
+    if (currentMsg) {
+      currentMsg.classList.add('error');
+      currentMsg.lastChild.textContent = 'Error: ' + text;
+    }
+    setState('idle');
+  }
+  function onDone() {
+    currentMsg = null;
+    if (bodyEl.className === 'thinking') setState('idle');
+  }
+
+  // --- sending ---
+  function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    addMsg('user', text);
+    input.value = '';
+    if (window.pywebview && window.pywebview.api) {
+      window.pywebview.api.send_message(text);
+    } else {
+      addMsg('error', 'Python bridge not ready yet.', 'error');
+    }
+  }
+
+  document.getElementById('sendBtn').addEventListener('click', send);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+  // --- microphone toggle (Stage 2) ---
+  const micBtn = document.getElementById('micBtn');
+  function setMicButton(on) { micBtn.classList.toggle('active', !!on); }
+  micBtn.addEventListener('click', () => {
+    if (window.pywebview && window.pywebview.api) {
+      window.pywebview.api.toggle_mic().then(r => {
+        setMicButton(r.on);
+        if (bodyEl.className === '' || bodyEl.className === 'listening') {
+          setState(r.state);
+        }
+      });
+    }
+  });
+  function initVoice() {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.get_state) {
+      window.pywebview.api.get_state().then(r => {
+        setMicButton(r.on);
+        if (bodyEl.className === '') setState(r.on ? 'listening' : 'idle');
+      });
+    }
+  }
+  window.addEventListener('pywebviewready', initVoice);
+  setTimeout(initVoice, 1200);
+</script>
+</body>
+</html>
