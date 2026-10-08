@@ -1,29 +1,33 @@
+# secrets - never commit
 .env
+
+# python environment
 venv/
 .venv/
 __pycache__/
 *.pyc
-broken_copy/
-*backup*
+
+# large speech models and archives (GB-sized, local only)
 model*/
 vosk*/
 *.zip
 *.onnx
 
+# personal data and runtime state (local only)
 memory.json
 about_me.md
+JARVIS_BRIEF.md
 permissions.json*
 action_log.txt
-*.log
 workspace/
+*.log
+
+# local backups and scratch copies
+broken_copy/
+*backup*
 jarvis_ui_before_*.py
+jarvis_ui_latest.py
 *.bak.py
 
-memory.json
-about_me.md
-permissions.json*
-action_log.txt
-*.log
-workspace/
-jarvis_ui_before_*.py
-*.bak.py
+# runtime lock
+jarvis.running
